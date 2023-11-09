@@ -1,13 +1,17 @@
 mod measurements;
 
-use crate::measurements::{MeasurementWindow, SensorSampleMeasurement};
+use crate::measurements::{MeasurementWindow, SensorSample, SensorSampleMeasurement};
 use eframe::{egui, Frame};
 
-use std::io::BufRead;
+use std::io::{BufRead, BufReader};
 use std::sync::*;
 use std::thread;
 use egui::{Color32, Context};
 use tracing::{error, info, warn};
+
+use serialport;
+use serde::Deserialize;
+use std::time::Duration;
 
 pub struct MonitorApp {
     include_y: Vec<f64>,
@@ -28,7 +32,7 @@ impl MonitorApp {
 impl eframe::App for MonitorApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let mut plot = egui_plot::Plot::new("measurements");
+            let mut plot = egui_plot::Plot::new("measurements").legend(Legend::default());
             for y in self.include_y.iter() {
                 plot = plot.include_y(*y);
             }
@@ -48,6 +52,7 @@ impl eframe::App for MonitorApp {
 }
 
 use clap::Parser;
+use egui_plot::Legend;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -78,6 +83,35 @@ fn main() {
 
     thread::spawn(move || {
         //Read Sensor Data Here
+        let mut serial_port = serialport::new("/dev/ttyUSB0", 115200)
+            .timeout(Duration::from_millis(1500))
+            // .parity(Parity::Even)
+            .open()
+            .expect("Failed to open serial port");
+        let mut reader = BufReader::new(serial_port);
+        loop {
+            let mut my_str = String::new();
+            match reader.read_line(&mut my_str) {
+                Ok(_) => (),
+                _ => continue,
+            };
+            let slice = my_str.trim();
+            // println!("{} - Size: {}", &slice, &slice.len());
+            if slice.len() == 1050 {
+                let mut hex_decode_vec = hex::decode(slice).expect("Could Not Decode Hex");
+                let hex_decode_slice = hex_decode_vec.as_mut_slice();
+                if let Ok(deserialised) = postcard::take_from_bytes_cobs::<[SensorSample; 30]>(hex_decode_slice) {
+                    for sensor_sample in deserialised.0.iter() {
+                        monitor_ref
+                            .lock()
+                            .unwrap()
+                            .add(*sensor_sample)
+                    }
+                    // println!("{:?}", &deserialised.0);
+                    // println!("{:?}", &deserialised.1);
+                };
+            }
+        }
     });
 
     info!("Main thread started");

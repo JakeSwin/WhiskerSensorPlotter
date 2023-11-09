@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
+use serde::Deserialize;
 
 pub type Measurement = egui_plot::PlotPoint;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct SensorSample {
     t: u16,
     x: u16,
